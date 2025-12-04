@@ -66,8 +66,6 @@
       min-height: 220px;
       object-fit: cover;
     }
-
-    /* Indicadores */
     .stats-grid {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -138,12 +136,11 @@
     <h3>Cámara</h3>
     <p class="small">
       Apunta al código de barras del reverso del DNI, acércalo y manténlo quieto.
-      Si no lo lee, escribe el DNI manualmente.
     </p>
     <video id="video" autoplay playsinline style="display:none;"></video>
   </div>
 
-  <!-- Nuevo registro -->
+  <!-- Registrar nuevo colaborador -->
   <div id="nuevoRegistroCard" class="card" style="display:none;">
     <h3>Registrar colaborador</h3>
 
@@ -161,6 +158,7 @@
       <option value="L">L</option>
       <option value="XL">XL</option>
       <option value="XXL">XXL</option>
+      <option value="XXXL">XXXL</option>
     </select>
 
     <button id="btnGuardar">Guardar colaborador</button>
@@ -169,191 +167,202 @@
     <div id="msgNuevo" class="msg" style="display:none;"></div>
   </div>
 
-  <!-- Librería ZXing -->
+  <!-- ZXing -->
   <script src="https://unpkg.com/@zxing/library@0.20.0"></script>
 
-  <script>
-    /* ------------------ BASE DE DATOS ------------------ */
-    // Aquí puedes cargar tus DNIs reales con nombre, talla y entregado=false
-    const colaboradores = [
-      { dni: "12345678", nombre: "Juan Pérez", talla: "M", entregado: false },
-      { dni: "87654321", nombre: "María Gómez", talla: "L", entregado: true }
-    ];
+  <!-- Firebase -->
+  <script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+import {
+  getDatabase, ref, get, set, update, onValue, push
+} from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
 
-    /* ------------------ ELEMENTOS ------------------ */
-    const dniInput = document.getElementById("dniInput");
-    const resultDiv = document.getElementById("result");
-    const nuevoCard = document.getElementById("nuevoRegistroCard");
-    const btnMarcarEntrega = document.getElementById("btnMarcarEntrega");
-    const video = document.getElementById("video");
+const firebaseConfig = {
+  apiKey: "AIzaSyCSGTUX5DDQK4EeLWkRxisy-tr_BImt5is",
+  authDomain: "regalominero.firebaseapp.com",
+  databaseURL: "https://regalominero-default-rtdb.firebaseio.com",
+  projectId: "regalominero",
+  storageBucket: "regalominero.firebasestorage.app",
+  messagingSenderId: "44362284772",
+  appId: "1:44362284772:web:9c9295fb0dc7dc9a7436f1"
+};
 
-    const indRegistrados = document.getElementById("indRegistrados");
-    const indEntregados = document.getElementById("indEntregados");
-    const indPendientes = document.getElementById("indPendientes");
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
 
-    let ultimoDniConsultado = null;
-    let codeReader = null;
-    let escaneando = false;
+/* ELEMENTOS */
+const dniInput = document.getElementById("dniInput");
+const resultDiv = document.getElementById("result");
+const nuevoCard = document.getElementById("nuevoRegistroCard");
+const btnMarcarEntrega = document.getElementById("btnMarcarEntrega");
+const video = document.getElementById("video");
 
-    /* ------------------ INDICADORES ------------------ */
-    function actualizarIndicadores() {
-      const total = colaboradores.length;
-      const entregados = colaboradores.filter(c => c.entregado).length;
-      const pendientes = total - entregados;
+const indRegistrados = document.getElementById("indRegistrados");
+const indEntregados = document.getElementById("indEntregados");
+const indPendientes = document.getElementById("indPendientes");
 
-      indRegistrados.textContent = total;
-      indEntregados.textContent = entregados;
-      indPendientes.textContent = pendientes;
-    }
-    actualizarIndicadores();
+let colaboradoresCache = [];
+let ultimoDniConsultado = null;
+let codeReader = null;
+let escaneando = false;
 
-    /* ------------------ CONSULTAR ------------------ */
-    document.getElementById("btnConsultar").onclick = consultar;
+/* ======================================================
+   🔄 CARGA EN TIEMPO REAL
+========================================================= */
+onValue(ref(db, "Colaboradores"), (snapshot) => {
+  colaboradoresCache = [];
+  let total = 0, entregados = 0;
 
-    function consultar() {
-      const dni = dniInput.value.trim();
-      if (!dni) {
-        resultDiv.innerHTML = "<div class='msg error'>Ingresa un DNI.</div>";
-        return;
-      }
+  snapshot.forEach(child => {
+    const data = child.val();
+    data._key = child.key;
+    colaboradoresCache.push(data);
 
-      const c = colaboradores.find(x => x.dni === dni);
+    total++;
+    if (data.entregado === true) entregados++;
+  });
 
-      resultDiv.innerHTML = "";
-      nuevoCard.style.display = "none";
-      btnMarcarEntrega.style.display = "none";
-      ultimoDniConsultado = dni;
+  indRegistrados.textContent = total;
+  indEntregados.textContent = entregados;
+  indPendientes.textContent = total - entregados;
+});
 
-      if (!c) {
-        resultDiv.innerHTML = `<div class='msg info'>No se encontró el DNI <strong>${dni}</strong>.</div>`;
-        document.getElementById("dniNuevo").value = dni;
-        document.getElementById("nombreNuevo").value = "";
-        document.getElementById("tallaNuevo").value = "";
-        nuevoCard.style.display = "block";
-        return;
-      }
+/* ======================================================
+   🔍 CONSULTAR DNI
+========================================================= */
+document.getElementById("btnConsultar").onclick = consultar;
 
-      const estado = c.entregado
-        ? "<span style='color:green;'>✔ Presente entregado</span>"
-        : "<span style='color:#b76e00;'>Pendiente de entrega</span>";
+async function consultar() {
+  const dni = dniInput.value.trim();
+  if (!dni) {
+    resultDiv.innerHTML = "<div class='msg error'>Ingresa un DNI.</div>";
+    return;
+  }
 
-      resultDiv.innerHTML = `
-        <p><strong>${c.nombre}</strong> (${c.dni})</p>
-        <p>Talla: <strong>${c.talla}</strong></p>
-        <p>Estado: ${estado}</p>
-      `;
+  resultDiv.innerHTML = "";
+  nuevoCard.style.display = "none";
+  btnMarcarEntrega.style.display = "none";
+  ultimoDniConsultado = dni;
 
-      if (!c.entregado) btnMarcarEntrega.style.display = "block";
-    }
+  const found = colaboradoresCache.find(c => c.DNI == dni);
 
-    /* ------------------ NUEVO COLABORADOR ------------------ */
-    document.getElementById("btnGuardar").onclick = () => {
-      const dni = document.getElementById("dniNuevo").value;
-      const nombre = document.getElementById("nombreNuevo").value.trim();
-      const talla = document.getElementById("tallaNuevo").value;
-      const msg = document.getElementById("msgNuevo");
+  if (!found) {
+    resultDiv.innerHTML = `<div class='msg info'>No se encontró el DNI <strong>${dni}</strong>.</div>`;
+    document.getElementById("dniNuevo").value = dni;
+    nuevoCard.style.display = "block";
+    return;
+  }
 
-      msg.style.display = "none";
+  const estado = found.entregado
+    ? "<span style='color:green;'>✔ Presente entregado</span>"
+    : "<span style='color:#b76e00;'>Pendiente de entrega</span>";
 
-      if (!nombre || !talla) {
-        msg.textContent = "Completa nombre y talla.";
-        msg.className = "msg error";
-        msg.style.display = "block";
-        return;
-      }
+  resultDiv.innerHTML = `
+    <p><strong>${found.Apellidos_Nombres}</strong> (${dni})</p>
+    <p>Talla: <strong>${found.TALLA}</strong></p>
+    <p>Planilla: <strong>${found.Planilla}</strong></p>
+    <p>Estado: ${estado}</p>
+  `;
 
-      colaboradores.push({ dni, nombre, talla, entregado: false });
+  if (!found.entregado) btnMarcarEntrega.style.display = "block";
+}
 
-      consultar();
-      actualizarIndicadores();
-      msg.textContent = "Colaborador registrado correctamente.";
-      msg.className = "msg info";
-      msg.style.display = "block";
-    };
+/* ======================================================
+   ✔ MARCAR ENTREGA
+========================================================= */
+btnMarcarEntrega.onclick = async () => {
+  const c = colaboradoresCache.find(x => x.DNI == ultimoDniConsultado);
+  if (!c) return;
 
-    document.getElementById("btnCancelar").onclick = () => {
-      nuevoCard.style.display = "none";
-    };
+  await update(ref(db, "Colaboradores/" + c._key), {
+    entregado: true
+  });
 
-    /* ------------------ MARCAR ENTREGA ------------------ */
-    btnMarcarEntrega.onclick = () => {
-      const c = colaboradores.find(x => x.dni === ultimoDniConsultado);
-      if (!c || c.entregado) return;
+  alert("Presente marcado como entregado ✔");
+  consultar();
+};
 
-      c.entregado = true;
-      consultar();
-      actualizarIndicadores();
-      alert("Presente marcado como entregado ✔");
-    };
+/* ======================================================
+   ➕ NUEVO COLABORADOR
+========================================================= */
+document.getElementById("btnGuardar").onclick = async () => {
+  const dni = document.getElementById("dniNuevo").value;
+  const nombre = document.getElementById("nombreNuevo").value.trim();
+  const talla = document.getElementById("tallaNuevo").value;
+  const msg = document.getElementById("msgNuevo");
 
-    /* ------------------ ESCÁNER DE DNI ------------------ */
-    document.getElementById("btnCamara").onclick = activarCamara;
+  msg.style.display = "none";
 
-    function extraerDni(texto) {
-      const m = texto.match(/\b\d{8}\b/);
-      return m ? m[0] : null;
-    }
+  if (!nombre || !talla) {
+    msg.textContent = "Completa nombre y talla.";
+    msg.className = "msg error";
+    msg.style.display = "block";
+    return;
+  }
 
-    async function activarCamara() {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        alert("Este navegador no soporta cámara.");
-        return;
-      }
+  await push(ref(db, "Colaboradores"), {
+    Apellidos_Nombres: nombre,
+    DNI: dni,
+    Planilla: "SIN PLANILLA",
+    TALLA: talla,
+    entregado: false
+  });
 
-      if (!codeReader) {
-        codeReader = new ZXing.BrowserMultiFormatReader();
-      }
+  msg.textContent = "Colaborador registrado correctamente.";
+  msg.className = "msg info";
+  msg.style.display = "block";
 
-      if (!escaneando) {
-        escaneando = true;
-        video.style.display = "block";
-        document.getElementById("btnCamara").textContent = "Detener cámara";
+  consultar();
+};
 
-        const constraints = {
-          video: {
-            facingMode: { ideal: "environment" },
-            width: { ideal: 1920 },
-            height: { ideal: 1080 }
+document.getElementById("btnCancelar").onclick = () => {
+  nuevoCard.style.display = "none";
+};
+
+/* ======================================================
+   📷 ESCÁNER DNI
+========================================================= */
+document.getElementById("btnCamara").onclick = activarCamara;
+
+function extraerDni(texto) {
+  const m = texto.match(/\b\d{8}\b/);
+  return m ? m[0] : null;
+}
+
+async function activarCamara() {
+  if (!codeReader) {
+    codeReader = new ZXing.BrowserMultiFormatReader();
+  }
+
+  if (!escaneando) {
+    escaneando = true;
+    video.style.display = "block";
+    document.getElementById("btnCamara").textContent = "Detener cámara";
+
+    try {
+      await codeReader.decodeFromVideoDevice(null, video, (result) => {
+        if (result) {
+          const dni = extraerDni(result.getText());
+          if (dni) {
+            dniInput.value = dni;
+            consultar();
+            detenerCamara();
           }
-        };
-
-        try {
-          await codeReader.decodeFromConstraints(
-            constraints,
-            "video",
-            (result, err) => {
-              if (result) {
-                const text = result.getText();
-                console.log("Código leído:", text);
-                const dni = extraerDni(text);
-                if (dni) {
-                  dniInput.value = dni;
-                  consultar();
-                  alert("DNI detectado: " + dni);
-                  detenerCamara();
-                }
-              }
-            }
-          );
-        } catch (e) {
-          console.error(e);
-          alert("No se pudo acceder a la cámara: " + e.message);
-          detenerCamara();
         }
-      } else {
-        detenerCamara();
-      }
+      });
+    } catch (e) {
+      alert("No se pudo acceder a la cámara.");
+      detenerCamara();
     }
+  } else detenerCamara();
+}
 
-    function detenerCamara() {
-      escaneando = false;
-      video.style.display = "none";
-      document.getElementById("btnCamara").textContent = "Activar cámara (leer DNI)";
-      if (codeReader) {
-        try { codeReader.reset(); } catch (e) { console.warn(e); }
-      }
-    }
+function detenerCamara() {
+  escaneando = false;
+  video.style.display = "none";
+  document.getElementById("btnCamara").textContent = "Activar cámara (leer DNI)";
+  if (codeReader) codeReader.reset();
+}
   </script>
 </body>
 </html>
-
