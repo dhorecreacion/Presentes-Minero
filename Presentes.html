@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Entrega de presente - Día del Minero</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      padding: 16px;
+      background: #f5f5f9;
+    }
+    h2 { margin-bottom: 8px; }
+    .card {
+      background: #fff;
+      border-radius: 10px;
+      padding: 16px;
+      max-width: 430px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      margin-bottom: 16px;
+    }
+    label {
+      font-size: 0.9rem;
+      display: block;
+      margin-top: 8px;
+    }
+    input, select {
+      width: 100%;
+      padding: 8px;
+      margin-top: 4px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      font-size: 1rem;
+      box-sizing: border-box;
+    }
+    button {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: none;
+      font-size: 1rem;
+      cursor: pointer;
+      width: 100%;
+      background: #304ffe;
+      color: #fff;
+      font-weight: 600;
+    }
+    button.secondary { background: #e0e0e0; color: #333; }
+    button.success { background: #00c853; }
+    .result { margin-top: 12px; font-size: 0.95rem; }
+    .msg {
+      padding: 8px 10px;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      margin-top: 8px;
+    }
+    .msg.info { background: #e3f2fd; color: #0d47a1; }
+    .msg.error { background: #ffebee; color: #b71c1c; }
+    .small { font-size: 0.8rem; color: #666; margin-top: 4px; }
+    video {
+      width: 100%;
+      max-width: 430px;
+      border-radius: 10px;
+      margin-top: 10px;
+      background: #000;
+      min-height: 220px;
+      object-fit: cover;
+    }
+
+    /* Indicadores */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 8px;
+    }
+    .stat-box {
+      background: #f5f7ff;
+      border-radius: 8px;
+      padding: 8px 10px;
+    }
+    .stat-box.entregado { background: #e8f5e9; }
+    .stat-box.pendiente { background: #fff3e0; }
+    .stat-label {
+      font-size: 0.75rem;
+      color: #555;
+      margin: 0;
+    }
+    .stat-value {
+      font-size: 1.2rem;
+      font-weight: 700;
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+  <h2>Entrega de presente – Día del Minero</h2>
+  <p class="small">
+    Escanea o ingresa el DNI del colaborador para registrar la entrega del presente.
+  </p>
+
+  <!-- Indicadores -->
+  <div class="card">
+    <h3>Resumen</h3>
+    <div class="stats-grid">
+      <div class="stat-box">
+        <p class="stat-label">Colaboradores registrados</p>
+        <p class="stat-value" id="indRegistrados">0</p>
+      </div>
+      <div class="stat-box entregado">
+        <p class="stat-label">Presentes entregados</p>
+        <p class="stat-value" id="indEntregados">0</p>
+      </div>
+      <div class="stat-box pendiente">
+        <p class="stat-label">Pendientes</p>
+        <p class="stat-value" id="indPendientes">0</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Consulta -->
+  <div class="card">
+    <label for="dniInput">DNI del colaborador</label>
+    <input id="dniInput" type="text" placeholder="Ejemplo: 12345678" />
+
+    <button id="btnConsultar">Buscar</button>
+    <button id="btnCamara" class="secondary">Activar cámara (leer DNI)</button>
+
+    <div id="result" class="result"></div>
+
+    <button id="btnMarcarEntrega" class="success" style="display:none;">
+      Marcar presente entregado
+    </button>
+  </div>
+
+  <!-- Cámara -->
+  <div class="card">
+    <h3>Cámara</h3>
+    <p class="small">
+      Apunta al código de barras del reverso del DNI, acércalo y manténlo quieto.
+      Si no lo lee, escribe el DNI manualmente.
+    </p>
+    <video id="video" autoplay playsinline style="display:none;"></video>
+  </div>
+
+  <!-- Nuevo registro -->
+  <div id="nuevoRegistroCard" class="card" style="display:none;">
+    <h3>Registrar colaborador</h3>
+
+    <label>DNI</label>
+    <input id="dniNuevo" type="text" readonly />
+
+    <label>Nombre completo</label>
+    <input id="nombreNuevo" type="text" />
+
+    <label>Talla</label>
+    <select id="tallaNuevo">
+      <option value="">Selecciona talla</option>
+      <option value="S">S</option>
+      <option value="M">M</option>
+      <option value="L">L</option>
+      <option value="XL">XL</option>
+      <option value="XXL">XXL</option>
+    </select>
+
+    <button id="btnGuardar">Guardar colaborador</button>
+    <button class="secondary" id="btnCancelar">Cancelar</button>
+
+    <div id="msgNuevo" class="msg" style="display:none;"></div>
+  </div>
+
+  <!-- Librería ZXing -->
+  <script src="https://unpkg.com/@zxing/library@0.20.0"></script>
+
+  <script>
+    /* ------------------ BASE DE DATOS ------------------ */
+    // Aquí puedes cargar tus DNIs reales con nombre, talla y entregado=false
+    const colaboradores = [
+      { dni: "12345678", nombre: "Juan Pérez", talla: "M", entregado: false },
+      { dni: "87654321", nombre: "María Gómez", talla: "L", entregado: true }
+    ];
+
+    /* ------------------ ELEMENTOS ------------------ */
+    const dniInput = document.getElementById("dniInput");
+    const resultDiv = document.getElementById("result");
+    const nuevoCard = document.getElementById("nuevoRegistroCard");
+    const btnMarcarEntrega = document.getElementById("btnMarcarEntrega");
+    const video = document.getElementById("video");
+
+    const indRegistrados = document.getElementById("indRegistrados");
+    const indEntregados = document.getElementById("indEntregados");
+    const indPendientes = document.getElementById("indPendientes");
+
+    let ultimoDniConsultado = null;
+    let codeReader = null;
+    let escaneando = false;
+
+    /* ------------------ INDICADORES ------------------ */
+    function actualizarIndicadores() {
+      const total = colaboradores.length;
+      const entregados = colaboradores.filter(c => c.entregado).length;
+      const pendientes = total - entregados;
+
+      indRegistrados.textContent = total;
+      indEntregados.textContent = entregados;
+      indPendientes.textContent = pendientes;
+    }
+    actualizarIndicadores();
+
+    /* ------------------ CONSULTAR ------------------ */
+    document.getElementById("btnConsultar").onclick = consultar;
+
+    function consultar() {
+      const dni = dniInput.value.trim();
+      if (!dni) {
+        resultDiv.innerHTML = "<div class='msg error'>Ingresa un DNI.</div>";
+        return;
+      }
+
+      const c = colaboradores.find(x => x.dni === dni);
+
+      resultDiv.innerHTML = "";
+      nuevoCard.style.display = "none";
+      btnMarcarEntrega.style.display = "none";
+      ultimoDniConsultado = dni;
+
+      if (!c) {
+        resultDiv.innerHTML = `<div class='msg info'>No se encontró el DNI <strong>${dni}</strong>.</div>`;
+        document.getElementById("dniNuevo").value = dni;
+        document.getElementById("nombreNuevo").value = "";
+        document.getElementById("tallaNuevo").value = "";
+        nuevoCard.style.display = "block";
+        return;
+      }
+
+      const estado = c.entregado
+        ? "<span style='color:green;'>✔ Presente entregado</span>"
+        : "<span style='color:#b76e00;'>Pendiente de entrega</span>";
+
+      resultDiv.innerHTML = `
+        <p><strong>${c.nombre}</strong> (${c.dni})</p>
+        <p>Talla: <strong>${c.talla}</strong></p>
+        <p>Estado: ${estado}</p>
+      `;
+
+      if (!c.entregado) btnMarcarEntrega.style.display = "block";
+    }
+
+    /* ------------------ NUEVO COLABORADOR ------------------ */
+    document.getElementById("btnGuardar").onclick = () => {
+      const dni = document.getElementById("dniNuevo").value;
+      const nombre = document.getElementById("nombreNuevo").value.trim();
+      const talla = document.getElementById("tallaNuevo").value;
+      const msg = document.getElementById("msgNuevo");
+
+      msg.style.display = "none";
+
+      if (!nombre || !talla) {
+        msg.textContent = "Completa nombre y talla.";
+        msg.className = "msg error";
+        msg.style.display = "block";
+        return;
+      }
+
+      colaboradores.push({ dni, nombre, talla, entregado: false });
+
+      consultar();
+      actualizarIndicadores();
+      msg.textContent = "Colaborador registrado correctamente.";
+      msg.className = "msg info";
+      msg.style.display = "block";
+    };
+
+    document.getElementById("btnCancelar").onclick = () => {
+      nuevoCard.style.display = "none";
+    };
+
+    /* ------------------ MARCAR ENTREGA ------------------ */
+    btnMarcarEntrega.onclick = () => {
+      const c = colaboradores.find(x => x.dni === ultimoDniConsultado);
+      if (!c || c.entregado) return;
+
+      c.entregado = true;
+      consultar();
+      actualizarIndicadores();
+      alert("Presente marcado como entregado ✔");
+    };
+
+    /* ------------------ ESCÁNER DE DNI ------------------ */
+    document.getElementById("btnCamara").onclick = activarCamara;
+
+    function extraerDni(texto) {
+      const m = texto.match(/\b\d{8}\b/);
+      return m ? m[0] : null;
+    }
+
+    async function activarCamara() {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        alert("Este navegador no soporta cámara.");
+        return;
+      }
+
+      if (!codeReader) {
+        codeReader = new ZXing.BrowserMultiFormatReader();
+      }
+
+      if (!escaneando) {
+        escaneando = true;
+        video.style.display = "block";
+        document.getElementById("btnCamara").textContent = "Detener cámara";
+
+        const constraints = {
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
+          }
+        };
+
+        try {
+          await codeReader.decodeFromConstraints(
+            constraints,
+            "video",
+            (result, err) => {
+              if (result) {
+                const text = result.getText();
+                console.log("Código leído:", text);
+                const dni = extraerDni(text);
+                if (dni) {
+                  dniInput.value = dni;
+                  consultar();
+                  alert("DNI detectado: " + dni);
+                  detenerCamara();
+                }
+              }
+            }
+          );
+        } catch (e) {
+          console.error(e);
+          alert("No se pudo acceder a la cámara: " + e.message);
+          detenerCamara();
+        }
+      } else {
+        detenerCamara();
+      }
+    }
+
+    function detenerCamara() {
+      escaneando = false;
+      video.style.display = "none";
+      document.getElementById("btnCamara").textContent = "Activar cámara (leer DNI)";
+      if (codeReader) {
+        try { codeReader.reset(); } catch (e) { console.warn(e); }
+      }
+    }
+  </script>
+</body>
+</html>
+
